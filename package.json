@@ -1,0 +1,16 @@
+{
+  "name": "flexion-ai-monorepo",
+  "version": "1.0.0",
+  "description": "Flexion AI Monorepo - Remote Musculoskeletal Screening and Real-Time Pose Estimation",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install --prefix frontend && npm install --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:ai": "python -m uvicorn main:app --reload --port 8000 --app-dir ai-service",
+    "dev:all": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\" \"npm run dev:ai\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
