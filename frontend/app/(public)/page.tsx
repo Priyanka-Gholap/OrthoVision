@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'next/link';
 import { 
   User, 
   Stethoscope, 
@@ -40,7 +41,7 @@ export default function Home() {
           {/* Action Portals */}
           <div id="portal" className="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
             {/* Patient Portal Card */}
-            <div className="bg-[#141820] border border-[#1e293b] hover:border-[#00b4d8]/50 p-8 rounded-2xl text-left transition-all group relative overflow-hidden">
+            <Link href="/patient" className="bg-[#141820] border border-[#1e293b] hover:border-[#00b4d8]/50 p-8 rounded-2xl text-left transition-all group relative overflow-hidden block">
               <div className="absolute top-0 right-0 w-32 h-32 bg-[#00b4d8]/5 rounded-bl-full pointer-events-none" />
               <div className="bg-[#00b4d8]/10 w-12 h-12 rounded-xl flex items-center justify-center border border-[#00b4d8]/20 mb-6 group-hover:scale-110 transition-transform">
                 <User className="h-6 w-6 text-[#00b4d8]" />
@@ -49,14 +50,14 @@ export default function Home() {
               <p className="text-sm text-[#94a3b8] mb-6 leading-relaxed">
                 Log in to complete assigned mobility assessments, view instructions, calibrate your webcam, and review range of motion analytics history.
               </p>
-              <button className="flex items-center gap-2 text-xs font-semibold text-[#00b4d8] group-hover:text-white transition-colors">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[#00b4d8] group-hover:text-white transition-colors">
                 <span>Enter Patient Portal</span>
                 <ChevronRight className="h-4 w-4 transform group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
+              </div>
+            </Link>
 
             {/* Doctor Portal Card */}
-            <div className="bg-[#141820] border border-[#1e293b] hover:border-[#7209b7]/50 p-8 rounded-2xl text-left transition-all group relative overflow-hidden">
+            <Link href="/doctor" className="bg-[#141820] border border-[#1e293b] hover:border-[#7209b7]/50 p-8 rounded-2xl text-left transition-all group relative overflow-hidden block">
               <div className="absolute top-0 right-0 w-32 h-32 bg-[#7209b7]/5 rounded-bl-full pointer-events-none" />
               <div className="bg-[#7209b7]/10 w-12 h-12 rounded-xl flex items-center justify-center border border-[#7209b7]/20 mb-6 group-hover:scale-110 transition-transform">
                 <Stethoscope className="h-6 w-6 text-[#9d4edd]" />
@@ -65,11 +66,11 @@ export default function Home() {
               <p className="text-sm text-[#94a3b8] mb-6 leading-relaxed">
                 Manage assigned patient lists, inspect joint range of motion charts, review stability indexes, compile PDF summaries, and add diagnostic comments.
               </p>
-              <button className="flex items-center gap-2 text-xs font-semibold text-[#9d4edd] group-hover:text-white transition-colors">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[#9d4edd] group-hover:text-white transition-colors">
                 <span>Enter Doctor Portal</span>
                 <ChevronRight className="h-4 w-4 transform group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
+              </div>
+            </Link>
           </div>
         </div>
       </section>

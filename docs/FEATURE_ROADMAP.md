@@ -38,7 +38,7 @@ Features
 
 Status
 
-⬜ Not Started
+✅ Completed
 
 ---
 
@@ -58,7 +58,7 @@ Features
 
 Status
 
-⬜ Not Started
+✅ Completed
 
 ---
 
@@ -76,7 +76,7 @@ Features
 
 Status
 
-⬜ Not Started
+✅ Completed
 
 ---
 

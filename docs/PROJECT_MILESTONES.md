@@ -6,7 +6,7 @@
 
 Status
 
-⬜ Not Started
+✅ Completed
 
 Deliverables
 
@@ -24,7 +24,7 @@ Deliverables
 
 Status
 
-⬜ Not Started
+✅ Completed
 
 Deliverables
 
@@ -40,7 +40,7 @@ Deliverables
 
 Status
 
-⬜ Not Started
+✅ Completed
 
 Deliverables
 

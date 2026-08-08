@@ -3,12 +3,15 @@ import cors from 'cors';
 import { loggerMiddleware } from './middleware/logger';
 import { errorHandlerMiddleware } from './middleware/errorHandler';
 import healthRouter from './routes/health';
+import authRouter from './routes/authRoutes';
+import patientRoutes from './routes/patientRoutes';
 
 const app = express();
 
 // Express configuration & standard middlewares
 app.use(cors({
-  origin: '*', // Allow all origins for local dev integration, tighten in prod
+  origin: 'http://localhost:3000', // Explicit origin required when credentials=true
+  credentials: true, // Allow cookies to be shared
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-AI-SERVICE-KEY'],
 }));
@@ -22,11 +25,10 @@ app.use(loggerMiddleware);
 // API Routing prefixes
 app.use('/api', healthRouter); // Mounts GET /api/health
 
-// API V1 versioned routing prefixes (defined for future controllers in Milestone 2)
-// app.use('/api/v1/auth', authRouter);
-// app.use('/api/v1/patients', patientRouter);
+// API V1 versioned routing prefixes
+app.use('/api/v1/auth', authRouter);
+app.use('/api/v1', patientRoutes);
 // app.use('/api/v1/doctors', doctorRouter);
-// app.use('/api/v1/assessment', assessmentRouter);
 // app.use('/api/v1/report', reportRouter);
 
 // Global Catcher Error Handling
