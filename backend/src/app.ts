@@ -5,6 +5,7 @@ import { errorHandlerMiddleware } from './middleware/errorHandler';
 import healthRouter from './routes/health';
 import authRouter from './routes/authRoutes';
 import patientRoutes from './routes/patientRoutes';
+import doctorRoutes from './routes/doctorRoutes';
 
 const app = express();
 
@@ -28,7 +29,7 @@ app.use('/api', healthRouter); // Mounts GET /api/health
 // API V1 versioned routing prefixes
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1', patientRoutes);
-// app.use('/api/v1/doctors', doctorRouter);
+app.use('/api/v1/doctor', doctorRoutes);
 // app.use('/api/v1/report', reportRouter);
 
 // Global Catcher Error Handling
