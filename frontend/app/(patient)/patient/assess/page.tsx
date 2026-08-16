@@ -7,7 +7,8 @@ import { useAuth } from '../../../context/AuthContext';
 import { CalibrationOverlay } from '../../../../components/patient/CalibrationOverlay';
 import { getPoseLandmarker, destroyPoseLandmarker } from '../../../../services/poseDetection';
 import { PoseLandmarker } from '@mediapipe/tasks-vision';
-import { Camera, Check, ShieldAlert, ArrowLeft, Loader2, RotateCw, RefreshCw, Cpu, Activity } from 'lucide-react';
+import { calculateJointAngle, getRequiredLandmarksForFrame, EMAFilter, PoseLandmark } from '../../../../utils/kinematics';
+import { Camera, ShieldAlert, ArrowLeft, Loader2, RotateCw, RefreshCw, Cpu } from 'lucide-react';
 
 interface JointDetail {
   id: string;
@@ -130,33 +131,6 @@ const POSE_CONNECTIONS: [number, number][] = [
   [24, 26], [26, 28]  // Right Leg
 ];
 
-const getRequiredLandmarksForFrame = (jointId: string, landmarks: any[]): number[] => {
-  if (!landmarks || landmarks.length === 0) return [];
-
-  // Determine side presentation: compare left shoulder (11) visibility with right shoulder (12)
-  const leftShoulderVis = landmarks[11]?.visibility || 0;
-  const rightShoulderVis = landmarks[12]?.visibility || 0;
-  const isLeftPresented = leftShoulderVis > rightShoulderVis;
-
-  if (jointId === 'SF001' || jointId === 'EF001') {
-    // Side view exercises: require only the presented side
-    return isLeftPresented ? [11, 13, 15] : [12, 14, 16]; // Shoulder, elbow, wrist
-  }
-  if (jointId === 'SA001') {
-    // Front view: requires both shoulders, elbows, wrists
-    return [11, 12, 13, 14, 15, 16];
-  }
-  if (jointId === 'HF001' || jointId === 'KF001') {
-    // Side view leg exercises: require only the presented side
-    return isLeftPresented ? [23, 25, 27] : [24, 26, 28]; // Hip, knee, ankle
-  }
-  if (jointId === 'NR001') {
-    // Front view neck: nose, eyes, shoulders
-    return [0, 2, 5, 11, 12];
-  }
-  return [];
-};
-
 function AssessPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -170,6 +144,9 @@ function AssessPageContent() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [aiErrorMsg, setAiErrorMsg] = useState<string | null>(null);
   
+  // Locked Side Selection
+  const [lockedSide, setLockedSide] = useState<'LEFT' | 'RIGHT' | null>(null);
+
   // Occupancy errors
   const [noPersonDetected, setNoPersonDetected] = useState<boolean>(false);
   const [multiplePeopleDetected, setMultiplePeopleDetected] = useState<boolean>(false);
@@ -182,10 +159,18 @@ function AssessPageContent() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const landmarkerRef = useRef<PoseLandmarker | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const angleDisplayRef = useRef<HTMLSpanElement>(null);
   
-  // Timers for low confidence tracking using elapsed time (performance.now())
+  // Filters and side detection refs
+  const emaFilterRef = useRef<EMAFilter>(new EMAFilter(0.25));
+  const lockedSideRef = useRef<'LEFT' | 'RIGHT' | null>(null);
   const lowConfidenceStartRef = useRef<number | null>(null);
   const calibrationStartRef = useRef<number | null>(null);
+
+  // Visibility accumulator for locked presenting-side selection
+  const accumLeftVisRef = useRef<number>(0);
+  const accumRightVisRef = useRef<number>(0);
+  const accumFramesRef = useRef<number>(0);
 
   // Validate URL Parameter
   useEffect(() => {
@@ -214,9 +199,15 @@ function AssessPageContent() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    // Reset timers
+    // Reset calculators
     lowConfidenceStartRef.current = null;
     calibrationStartRef.current = null;
+    lockedSideRef.current = null;
+    setLockedSide(null);
+    emaFilterRef.current.reset();
+    accumLeftVisRef.current = 0;
+    accumRightVisRef.current = 0;
+    accumFramesRef.current = 0;
   };
 
   if (!jointInfo) {
@@ -300,6 +291,8 @@ function AssessPageContent() {
         const timestamp = performance.now();
         const results = landmarker.detectForVideo(video, timestamp);
 
+        let formattedAngle = '--';
+
         if (results && results.landmarks && results.landmarks.length > 0) {
           // Occupancy Check
           const posesCount = results.landmarks.length;
@@ -311,7 +304,14 @@ function AssessPageContent() {
             setNoPersonDetected(false);
           }
 
-          const landmarks = results.landmarks[0]; // Single-person expected (numPoses = 1)
+          const landmarks = results.landmarks[0] as PoseLandmark[]; // Single-person configuration (numPoses = 1)
+          
+          // Side presentation checks helper
+          const leftShoulder = landmarks[11];
+          const rightShoulder = landmarks[12];
+          
+          // Determine landmarks required depending on presentation side (fallback to LEFT before lock)
+          const activeSide = lockedSideRef.current || (leftShoulder?.visibility > rightShoulder?.visibility ? 'LEFT' : 'RIGHT');
           const requiredLandmarks = getRequiredLandmarksForFrame(jointInfo.id, landmarks);
 
           // Check required joints confidence
@@ -330,20 +330,59 @@ function AssessPageContent() {
             }
             // Reset calibration timer if confidence is lost
             calibrationStartRef.current = null;
+            
             // Retain POSE_DETECTION state until visible
-            setCurrentState('POSE_DETECTION');
+            if (currentState !== 'CAMERA_READY') {
+              setCurrentState('POSE_DETECTION');
+            }
           } else {
             // Confidence restored: reset warning timer
             lowConfidenceStartRef.current = null;
             setLowConfidenceWarning(false);
 
-            // Trigger calibration timer (stable visibility for 2 seconds continuously)
+            // Accumulate visibilities to lock side during calibration state
             if (currentState === 'POSE_DETECTION') {
               setCurrentState('CALIBRATION');
               calibrationStartRef.current = now;
+              
+              accumLeftVisRef.current = 0;
+              accumRightVisRef.current = 0;
+              accumFramesRef.current = 0;
             } else if (currentState === 'CALIBRATION') {
+              // Accumulate frame metrics
+              const lVis = (landmarks[11]?.visibility || 0) + (landmarks[13]?.visibility || 0) + (landmarks[15]?.visibility || 0) + (landmarks[23]?.visibility || 0) + (landmarks[25]?.visibility || 0) + (landmarks[27]?.visibility || 0);
+              const rVis = (landmarks[12]?.visibility || 0) + (landmarks[14]?.visibility || 0) + (landmarks[16]?.visibility || 0) + (landmarks[24]?.visibility || 0) + (landmarks[26]?.visibility || 0) + (landmarks[28]?.visibility || 0);
+              accumLeftVisRef.current += lVis;
+              accumRightVisRef.current += rVis;
+              accumFramesRef.current += 1;
+
               if (calibrationStartRef.current !== null && now - calibrationStartRef.current > 2000) {
+                // Lock presenting side
+                const meanL = accumLeftVisRef.current / (6 * accumFramesRef.current);
+                const meanR = accumRightVisRef.current / (6 * accumFramesRef.current);
+                const locked = meanL > meanR ? 'LEFT' : 'RIGHT';
+                
+                lockedSideRef.current = locked;
+                setLockedSide(locked);
+                console.log(`[Kinematics] Presenting side locked to: ${locked} (L: ${meanL.toFixed(2)} vs R: ${meanR.toFixed(2)})`);
+
                 setCurrentState('READY');
+              }
+            }
+          }
+
+          // Calculate joint angle if visibility is valid
+          if (!hasLowConfidenceJoints) {
+            const angleRes = calculateJointAngle(jointInfo.id, landmarks, lockedSideRef.current);
+            if (angleRes.isValid && angleRes.angle !== null) {
+              // Smooth coordinates via EMA Filter
+              const smoothed = emaFilterRef.current.filter(angleRes.angle);
+              if (smoothed !== null) {
+                if (jointInfo.id === 'NR001' && angleRes.direction) {
+                  formattedAngle = `${Math.round(smoothed)}° (${angleRes.direction})`;
+                } else {
+                  formattedAngle = `${Math.round(smoothed)}°`;
+                }
               }
             }
           }
@@ -396,12 +435,18 @@ function AssessPageContent() {
           // No person detected at all
           setNoPersonDetected(true);
           setMultiplePeopleDetected(false);
-          // Reset low confidence check
+          // Reset filters
           lowConfidenceStartRef.current = null;
           calibrationStartRef.current = null;
-          if (currentState !== 'POSE_DETECTION') {
+          emaFilterRef.current.reset();
+          if (currentState !== 'POSE_DETECTION' && currentState !== 'CAMERA_READY') {
             setCurrentState('POSE_DETECTION');
           }
+        }
+
+        // High-performance DOM insertion bypassing React render loops
+        if (angleDisplayRef.current) {
+          angleDisplayRef.current.innerText = formattedAngle;
         }
       }
 
@@ -491,6 +536,13 @@ function AssessPageContent() {
                 </ol>
               </div>
 
+              {jointInfo.id === 'NR001' && (
+                <div className="bg-[#1e293b]/50 border border-[#334155] p-4 rounded-xl text-xs text-yellow-500 leading-relaxed">
+                  <span className="font-bold block mb-1">⚠️ Medical Disclaimer</span>
+                  This neck rotation measurement is a 2D planar angular-deviation proxy and not a direct 3D goniometric cervical rotation measurement.
+                </div>
+              )}
+
               <button
                 onClick={handleRequestCamera}
                 className="inline-flex items-center justify-center gap-2 bg-[#00b4d8] hover:bg-[#0077b6] text-white py-3.5 px-6 rounded-xl text-xs font-bold transition-all w-fit mt-4"
@@ -526,7 +578,7 @@ function AssessPageContent() {
           </div>
         )}
 
-        {/* 3. ACTIVE FEED TRACKING CONTROLS (CAMERA_READY, AI_INITIALIZING, AI_INITIALIZATION_ERROR, POSE_DETECTION, CALIBRATION, READY) */}
+        {/* 3. ACTIVE FEED TRACKING CONTROLS (CAMERA_READY, AI_INITIALIZING, POSE_DETECTION, CALIBRATION, READY) */}
         {['CAMERA_READY', 'AI_INITIALIZING', 'AI_INITIALIZATION_ERROR', 'POSE_DETECTION', 'CALIBRATION', 'READY'].includes(currentState) && (
           <div className="flex flex-col gap-6">
             
@@ -604,14 +656,14 @@ function AssessPageContent() {
                 {currentState === 'CALIBRATION' && (
                   <span className="text-[#00b4d8] font-semibold flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#00b4d8] animate-ping" />
-                    Keypoints locked. Hold position for alignment...
+                    Keypoints locked. Calibrating presenting side...
                   </span>
                 )}
 
                 {currentState === 'READY' && (
                   <span className="text-[#10b981] font-semibold flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" />
-                    AI Calibrated & Ready!
+                    AI Calibrated & Side Locked ({lockedSide})!
                   </span>
                 )}
 
@@ -629,6 +681,22 @@ function AssessPageContent() {
 
               </div>
             </div>
+
+            {/* Live Kinematics Angle Display Container */}
+            {['POSE_DETECTION', 'CALIBRATION', 'READY'].includes(currentState) && (
+              <div className="grid grid-cols-2 gap-4 bg-[#141820] border border-[#1e293b] p-6 rounded-2xl">
+                <div>
+                  <span className="text-[10px] text-[#94a3b8] uppercase tracking-wider">Joint Tested</span>
+                  <p className="text-base font-bold text-white mt-1">{jointInfo.name}</p>
+                </div>
+                <div className="text-right border-l border-[#1e293b] pl-4">
+                  <span className="text-[10px] text-[#94a3b8] uppercase tracking-wider">Live Joint Angle</span>
+                  <p className="mt-1">
+                    <span ref={angleDisplayRef} className="text-2xl font-black text-[#00b4d8]">--</span>
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Development-only Warning Indicator details */}
             {currentState === 'READY' && (
@@ -659,7 +727,12 @@ function AssessPageContent() {
             <div>
               <span className="text-[10px] text-yellow-500 font-bold tracking-wider uppercase">Local Review Only</span>
               <h2 className="text-xl md:text-2xl font-bold text-white mt-1">Review ROM Simulation Results</h2>
-              <p className="text-xs text-[#94a3b8] mt-1">Local calculation framework test (Mock Angle: {devTestRom}°)</p>
+              {jointInfo.id === 'NR001' && (
+                <p className="text-xs text-yellow-500 leading-relaxed mt-1.5 font-medium">
+                  <strong>Disclaimer</strong>: This neck rotation measurement is a 2D planar angular-deviation proxy and not a direct 3D goniometric cervical rotation measurement.
+                </p>
+              )}
+              <p className="text-xs text-[#94a3b8] mt-1.5">Local calculation framework test (Mock Angle: {devTestRom}°)</p>
             </div>
 
             <div className="grid md:grid-cols-3 gap-6 bg-[#0d0f12] p-6 rounded-2xl border border-[#1e293b] text-center">
@@ -686,13 +759,13 @@ function AssessPageContent() {
                 disabled
                 className="inline-flex items-center justify-center gap-2 bg-[#1e293b] text-[#64748b] py-3.5 px-6 rounded-xl text-xs font-bold cursor-not-allowed border border-[#1e293b]"
               >
-                <span>Save Disabled (M5 Only)</span>
+                <span>Save Disabled (M6 Only)</span>
               </button>
               <button
                 onClick={handleRequestCamera}
                 className="inline-flex items-center justify-center gap-2 bg-[#7209b7] hover:bg-[#5b008d] text-white py-3.5 px-6 rounded-xl text-xs font-semibold transition-all"
               >
-                <Camera className="h-4 w-4" />
+                <RotateCw className="h-4 w-4" />
                 <span>Re-calibrate Camera Preview</span>
               </button>
             </div>

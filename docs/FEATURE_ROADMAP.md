@@ -130,7 +130,7 @@ Features
 
 Status
 
-⬜ Not Started
+✅ Completed
 
 ---
 

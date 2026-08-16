@@ -82,7 +82,7 @@ Deliverables
 
 Status
 
-⬜ Not Started
+✅ Completed
 
 Deliverables
 
