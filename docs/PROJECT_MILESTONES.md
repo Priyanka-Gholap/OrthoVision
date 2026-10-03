@@ -90,17 +90,26 @@ Deliverables
 
 ---
 
-### Milestone 7 – Range of Motion (ROM) & Analysis (FastAPI Server-Side)
+### Milestone 7 – ROM Analysis & Movement Metrics
 
 Status
 
-⬜ Not Started
+🔄 In Progress (Assessment Guidance & UX Verification)
 
 Deliverables
 
-- Server-side ROM Calculation from Landmark Coordinates
-- Server-side Movement Stability & Symmetry Analysis
-- Server-side Assessment Classification
+- Continuous smoothed joint-angle assessment measurement lifecycle (Start / Stop)
+- Clinical Range of Motion (ROM) calculation (Starting, Ending, Min, Max, Peak ROM, Movement Range)
+- Valid frame counting & assessment duration metrics
+- Clinical classification against reference ranges (Normal, Mild, Moderate, Severe Limitation)
+- Assessment positioning and movement guidance for all six movements:
+  - camera orientation guidance (Side View vs Front View)
+  - starting posture instructions
+  - movement instructions
+  - testing-side guidance (Left vs Right presenting side)
+  - visual reference guidance (silhouettes, movement direction arrows, target joint highlight)
+  - live readiness feedback checklist (body detected, joints visible, orientation aligned, position ready)
+- Assessment Result UI Card with empty/insufficient movement data error handling and normative benchmark wording
 
 ---
 
