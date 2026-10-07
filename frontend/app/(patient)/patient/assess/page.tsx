@@ -9,6 +9,7 @@ import { getPoseLandmarker, destroyPoseLandmarker } from '../../../../services/p
 import { PoseLandmarker } from '@mediapipe/tasks-vision';
 import { calculateJointAngle, getRequiredLandmarksForFrame, EMAFilter, PoseLandmark } from '../../../../utils/kinematics';
 import { calculateAssessmentMetrics, AssessmentMetrics, AngleSample, isValidAngle } from '../../../../utils/romAnalysis';
+import { saveAssessmentApi } from '../../../../services/assessment';
 import { Camera, ShieldAlert, ArrowLeft, Loader2, RotateCw, RefreshCw, Play, Square, Check, AlertTriangle, CheckCircle2, Info, Compass, Eye } from 'lucide-react';
 
 interface JointDetail {
@@ -229,6 +230,10 @@ function AssessPageContent() {
   // Assessment results and active recording states
   const [assessmentMetrics, setAssessmentMetrics] = useState<AssessmentMetrics | null>(null);
   const [recordingDurationSec, setRecordingDurationSec] = useState<number>(0);
+  const [assessmentSaveState, setAssessmentSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [assessmentSaveError, setAssessmentSaveError] = useState<string | null>(null);
+  const assessmentSaveAttemptedRef = useRef(false);
+  const assessmentSessionRef = useRef(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -584,6 +589,10 @@ function AssessPageContent() {
     lastDetectedDirectionRef.current = undefined;
     recordingStartTimeRef.current = performance.now();
     setRecordingDurationSec(0);
+    assessmentSessionRef.current += 1;
+    assessmentSaveAttemptedRef.current = false;
+    setAssessmentSaveState('idle');
+    setAssessmentSaveError(null);
     setCurrentState('RECORDING');
 
     if (recordingTimerRef.current) {
@@ -598,7 +607,7 @@ function AssessPageContent() {
   };
 
   // Stop Recording & Analyze Metrics
-  const handleStopRecording = () => {
+  const handleStopRecording = async () => {
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
@@ -619,6 +628,41 @@ function AssessPageContent() {
 
     setAssessmentMetrics(metrics);
     setCurrentState('RESULTS');
+
+    if (!metrics || assessmentSaveAttemptedRef.current) {
+      return;
+    }
+
+    const sessionId = assessmentSessionRef.current;
+    assessmentSaveAttemptedRef.current = true;
+    setAssessmentSaveState('saving');
+    setAssessmentSaveError(null);
+
+    try {
+      const response = await saveAssessmentApi({
+        joint: metrics.jointId,
+        peakRom: metrics.peakRom,
+        classification: metrics.classification,
+      });
+
+      if (sessionId !== assessmentSessionRef.current) {
+        return;
+      }
+
+      if (response.success) {
+        setAssessmentSaveState('saved');
+      } else {
+        setAssessmentSaveState('error');
+        setAssessmentSaveError(response.error?.message || 'Please try again later.');
+      }
+    } catch (error) {
+      if (sessionId !== assessmentSessionRef.current) {
+        return;
+      }
+
+      setAssessmentSaveState('error');
+      setAssessmentSaveError(error instanceof Error ? error.message : 'Please try again later.');
+    }
   };
 
   // Restart assessment from READY state
@@ -626,6 +670,8 @@ function AssessPageContent() {
     recordedSamplesRef.current = [];
     setAssessmentMetrics(null);
     setRecordingDurationSec(0);
+    setAssessmentSaveState('idle');
+    setAssessmentSaveError(null);
     setCurrentState('READY');
   };
 
@@ -1180,6 +1226,18 @@ function AssessPageContent() {
                   <span>Measurement Stream: <strong className="text-white">Valid</strong></span>
                   <span>Valid Frames Captured: <strong className="text-white">{assessmentMetrics.validFrameCount} frames</strong></span>
                 </div>
+
+                {assessmentSaveState !== 'idle' && (
+                  <div
+                    role={assessmentSaveState === 'error' ? 'alert' : 'status'}
+                    aria-live="polite"
+                    className={`text-sm ${assessmentSaveState === 'error' ? 'text-amber-300' : assessmentSaveState === 'saved' ? 'text-emerald-400' : 'text-[#00b4d8]'}`}
+                  >
+                    {assessmentSaveState === 'saving' && 'Saving assessment to your patient record…'}
+                    {assessmentSaveState === 'saved' && 'Assessment saved successfully.'}
+                    {assessmentSaveState === 'error' && `Assessment was calculated, but could not be saved. Your result is still available. ${assessmentSaveError || ''}`}
+                  </div>
+                )}
 
                 {/* Neck Rotation Disclaimer if NR001 */}
                 {jointInfo.id === 'NR001' && (
