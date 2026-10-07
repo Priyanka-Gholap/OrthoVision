@@ -1,15 +1,67 @@
 import { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import { Patient } from '../models/Patient';
 import { User } from '../models/User';
 import { Assessment } from '../models/Assessment';
 import { AppError } from '../middleware/errorHandler';
 import { TokenPayload } from '../utils/jwt/token';
+import { generateAssessmentReportPdf } from '../utils/pdf/assessmentReport';
 
 declare module 'express-serve-static-core' {
   interface Request {
     user?: TokenPayload;
   }
 }
+
+const createAppError = (message: string, statusCode: number, code: string): AppError => {
+  const error: AppError = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
+
+const getAuthorizedPatientAssessment = async (req: Request) => {
+  if (!req.user || req.user.role !== 'Doctor') {
+    throw createAppError('Access denied. Insufficient permissions.', 403, 'FORBIDDEN_ROLE');
+  }
+
+  const { patientId, assessmentId } = req.params;
+  if (!mongoose.isValidObjectId(patientId)) {
+    throw createAppError('Patient not found.', 404, 'NOT_FOUND');
+  }
+
+  const patientProfile = await Patient.findOne({ patientId }).populate('patientId', 'fullName');
+  if (!patientProfile) {
+    throw createAppError('Patient not found.', 404, 'NOT_FOUND');
+  }
+
+  if (!patientProfile.doctorId || patientProfile.doctorId.toString() !== req.user.id) {
+    throw createAppError(
+      'Access denied. You are not authorized to access this patient\'s clinical records.',
+      403,
+      'FORBIDDEN_PATIENT_ACCESS'
+    );
+  }
+
+  if (!mongoose.isValidObjectId(assessmentId)) {
+    throw createAppError('Assessment not found.', 404, 'ASSESSMENT_NOT_FOUND');
+  }
+
+  const assessment = await Assessment.findById(assessmentId);
+  if (!assessment) {
+    throw createAppError('Assessment not found.', 404, 'ASSESSMENT_NOT_FOUND');
+  }
+
+  if (assessment.patientId.toString() !== patientId) {
+    throw createAppError(
+      'Access denied. This assessment does not belong to the requested patient.',
+      403,
+      'FORBIDDEN_ASSESSMENT_ACCESS'
+    );
+  }
+
+  return { patientProfile, assessment };
+};
 
 /**
  * List all patients (privacy-filtered: name, email, assignment status only)
@@ -180,6 +232,58 @@ export const getPatientAssessments = async (req: Request, res: Response, next: N
       success: true,
       data: assessments,
     });
+  } catch (err: any) {
+    next(err);
+  }
+};
+
+export const updateAssessmentRemarks = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { assessment } = await getAuthorizedPatientAssessment(req);
+    const remarksValue = req.body?.remarks;
+    if (typeof remarksValue !== 'string') {
+      throw createAppError('Remarks must be a string.', 400, 'VALIDATION_ERROR');
+    }
+
+    if (remarksValue.length > 2000) {
+      throw createAppError('Remarks cannot exceed 2000 characters.', 400, 'VALIDATION_ERROR');
+    }
+
+    assessment.remarks = remarksValue.trim();
+    const updatedAssessment = await assessment.save();
+
+    res.status(200).json({
+      success: true,
+      data: updatedAssessment,
+    });
+  } catch (err: any) {
+    next(err);
+  }
+};
+
+export const getAssessmentReport = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { patientProfile, assessment } = await getAuthorizedPatientAssessment(req);
+    const patientUser = patientProfile.patientId as { _id?: { toString(): string }; fullName?: string } | null;
+    const pdf = await generateAssessmentReportPdf({
+      patientName: patientUser?.fullName,
+      patientId: patientUser?._id?.toString() || req.params.patientId,
+      age: patientProfile.age,
+      gender: patientProfile.gender,
+      height: patientProfile.height,
+      weight: patientProfile.weight,
+      assessmentDate: assessment.createdAt,
+      joint: assessment.joint,
+      peakRom: assessment.peakRom,
+      classification: assessment.classification,
+      confidenceScore: assessment.confidenceScore,
+      remarks: assessment.remarks,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="clinical-assessment-${assessment._id}.pdf"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.status(200).send(pdf);
   } catch (err: any) {
     next(err);
   }

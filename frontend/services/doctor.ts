@@ -5,7 +5,7 @@ const API_URL = getApiUrl();
 /**
  * Standard fetch helper that includes credentials (HttpOnly cookies)
  */
-async function fetchWithCredentials<T>(url: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
+async function fetchWithCredentials<T>(url: string, options: RequestInit = {}, responseType: 'json' | 'blob' = 'json'): Promise<ApiResponse<T>> {
   try {
     const response = await fetch(url, {
       ...options,
@@ -16,14 +16,22 @@ async function fetchWithCredentials<T>(url: string, options: RequestInit = {}): 
       credentials: 'include', // Crucial for sending/receiving HttpOnly cookies in dev
     });
 
-    const data = await response.json();
     if (!response.ok) {
+      const data = await response.json();
       return {
         success: false,
         error: data.error || { code: 'HTTP_ERROR', message: `Server returned status ${response.status}` },
       };
     }
 
+    if (responseType === 'blob') {
+      return {
+        success: true,
+        data: await response.blob() as T,
+      };
+    }
+
+    const data = await response.json();
     return {
       success: true,
       data: data.data as T,
@@ -66,6 +74,7 @@ export interface AssessmentRecord {
   peakRom: number;
   classification: 'Normal' | 'Mild Limitation' | 'Moderate Limitation' | 'Severe Limitation';
   confidenceScore: number;
+  remarks: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,4 +102,29 @@ export const getPatientAssessmentsApi = async (id: string): Promise<ApiResponse<
   return fetchWithCredentials<AssessmentRecord[]>(`${API_URL}/v1/doctor/patients/${id}/assessments`, {
     method: 'GET',
   });
+};
+
+export const updateAssessmentRemarksApi = async (
+  patientId: string,
+  assessmentId: string,
+  remarks: string
+): Promise<ApiResponse<AssessmentRecord>> => {
+  return fetchWithCredentials<AssessmentRecord>(
+    `${API_URL}/v1/doctor/patients/${encodeURIComponent(patientId)}/assessments/${encodeURIComponent(assessmentId)}/remarks`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ remarks }),
+    }
+  );
+};
+
+export const getAssessmentReportApi = async (
+  patientId: string,
+  assessmentId: string
+): Promise<ApiResponse<Blob>> => {
+  return fetchWithCredentials<Blob>(
+    `${API_URL}/v1/doctor/patients/${encodeURIComponent(patientId)}/assessments/${encodeURIComponent(assessmentId)}/report`,
+    { method: 'GET' },
+    'blob'
+  );
 };

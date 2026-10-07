@@ -6,6 +6,7 @@ export interface IAssessment {
   peakRom: number;
   classification: 'Normal' | 'Mild Limitation' | 'Moderate Limitation' | 'Severe Limitation';
   confidenceScore: number;
+  remarks: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -37,6 +38,11 @@ const assessmentSchema = new Schema<IAssessmentDocument>(
     confidenceScore: {
       type: Number,
       default: 1.0,
+    },
+    remarks: {
+      type: String,
+      default: '',
+      trim: true,
     },
   },
   {
